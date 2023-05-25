@@ -1,0 +1,679 @@
+
+---
+title: "RobotName: CloseBackBB"
+output: html_document
+---
+
+Version: 91.1
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+##this code takes files from TV and process them to create sumamry results comparable among optimizations. This is an improve version f the ones sued in scalper and loaded, which were for leaving positions open until profiting (Martingales) and closing positions, respectively. This version handles both types...by looking at the consequetive entries until reaching profit.
+## this versoin assume positions are closed when at a lost.
+
+##########################################################################################
+#THIS IS THE ONLY THING TO CHANGE
+RobotName="CloseBackBB" # TTTLoadedV1" #ScalperV3 LoadedV1  TTTLoadedV1 Karol Killerzones   BlaiKelt
+OptimizationNum= "03"
+
+
+NameOptimization=paste0(RobotName, "_", OptimizationNum)
+Path=paste0("C:/Users/Camilo/Downloads/", NameOptimization,"/",NameOptimization,"/")
+
+###########################################################################################
+
+
+
+library(data.table)
+library(dplyr)
+library(splitstackshape)
+library(plotly)
+library(tidyr)
+library(knitr)
+library(ggpubr)
+
+Pairs=c("AUDUSD", "EURGBP", "EURJPY", "EURUSD", "GBPJPY", "GBPUSD", "NZDUSD", "USDCAD", "USDCHF",  "USDJPY", "XAUUSD")
+StartingBalance=30000  #amount of initial capital
+MinMoneyEntry=1000     #Minimum amount of moey allowed to enter..$1,000 is the least we can invest
+MinActive=0.2          #number of entries per day set to 0.2..meaning it will be active atleast 20% of a year...or it will enter at least once a week
+GainAtTarget=30        #amount of money at 1% profit per day.. 1% of $30,000
+DesireMaxDD=10          # Maximum prcent DD allowed to select parameters
+MaxDesDayProf=1         #percentdesired dayliy profit
+#get list of files in folder
+    ListEntries=data.frame(FileName=list.files(Path))
+
+#process The files with the list of entries...select files with X number of chanrecterS in their name and that the first two letters are A and Zero. (common all all files with entries)
+    ListEntries$Letters=nchar(ListEntries$FileName)
+    EntryFiles=ListEntries %>% filter(Letters==10)
+    EntryFiles$A0=substring(EntryFiles$FileName,1,2)
+    EntryFiles=EntryFiles %>% filter(A0=="A0")
+
+    
+    
+    
+#############################################################################
+#############--------REsults from list of entries-----------#################
+#############################################################################
+    
+    
+    
+#calcualte the maximum drowdown of all position open at a given time
+Summary=data.frame()
+for (FileI in EntryFiles$FileName){
+      FileIData=read.csv(paste0(Path,FileI))  
+      
+      
+      colnames(FileIData)[13]="MoneyDD"
+      colnames(FileIData)[4]="Date"
+      colnames(FileIData)[9]="CumProf"
+
+      FileIData <- FileIData[complete.cases(FileIData[ , c("MoneyDD")]), ]
+      
+      #find out number of days...time difference between first time entry and when the last exit occured
+        #Date last entry
+            LastExit=FileIData$Date[1]
+            LastExit= strptime(LastExit, format = "%Y-%m-%d %H:%M")
+            if (is.na(LastExit)==TRUE){
+              LastExit=FileIData$Date[1]
+              LastExit= strptime(LastExit, format = "%m/%d/%Y %H:%M")
+            }
+          
+        #Date FIrst entry
+            FirstEntry=FileIData$Date[nrow(FileIData)]
+            FirstEntry= strptime(FirstEntry, format = "%Y-%m-%d %H:%M")
+              if (is.na(FirstEntry)==TRUE){
+                FirstEntry=FileIData$Date[nrow(FileIData)]
+                FirstEntry= strptime(FirstEntry, format = "%m/%d/%Y %H:%M")
+              }
+        Days=round(as.numeric(difftime(LastExit,FirstEntry, "days")),2)
+        
+     #select only the exits  
+      FileIData=cSplit(FileIData, 'Type', sep=" ", type.convert=FALSE)
+      FileIData=FileIData %>% filter(Type_1=="Entry")
+      
+      nEntries=nrow(FileIData)
+      
+     #Calcualte largest lost starting at initial capital, and count number of sequential lost entries
+      colnames(FileIData)[6] <- "TradeProfit"
+      colnames(FileIData)[1] <- "TradeNumber"
+      Profit=FileIData[1,8]
+      
+
+     #cluster entries for martingales...this is place as S:1, S:2 etc...when no martainagle used is only S...
+      nNcol=ncol(FileIData)
+      FileIData=cSplit(FileIData, 'Signal', sep=":", type.convert=FALSE)
+      SplitNCol=ncol(FileIData)
+      
+      FileIData$ClusterNum=0
+      if (nNcol==SplitNCol){
+      FileIData$ClusterNum=c(nrow(FileIData):1)} else {
+          ClustCounter=0
+          for (RawI in nrow(FileIData):1){
+            if(FileIData$Signal_2[RawI]==1){ClustCounter=ClustCounter+1}
+            FileIData$ClusterNum[RawI]=ClustCounter
+          }
+      } 
+
+      #Checkif in cluster
+      FileIData$IsCluster=FALSE
+      IsCluster=FALSE
+      for (RawI in nrow(FileIData):1){
+        if(length(FileIData$ClusterNum[RawI-1])==0){if(FileIData$ClusterNum[RawI]==FileIData$ClusterNum[RawI+1]){FileIData$IsCluster[RawI]=TRUE};next} ## for top raw
+        if(is.na(FileIData$ClusterNum[RawI+1])){if(FileIData$ClusterNum[RawI]==FileIData$ClusterNum[RawI-1]){FileIData$IsCluster[RawI]=TRUE};next} ## for Bottom raw
+        if(FileIData$ClusterNum[RawI]==FileIData$ClusterNum[RawI-1] || FileIData$ClusterNum[RawI]==FileIData$ClusterNum[RawI+1]){FileIData$IsCluster[RawI]=TRUE}
+      }
+      
+      
+      #Checkif if consecutive lost
+      FileIData$SequentialLost=0
+      IsLost=0
+      for (RawI in nrow(FileIData):1){
+        if(is.na(FileIData$TradeProfit[RawI+1])){if(FileIData$TradeProfit[RawI]<=0 ){IsLost=IsLost+1};FileIData$SequentialLost[RawI]=IsLost;next}
+        if(FileIData$TradeProfit[RawI]<=0 && FileIData$TradeProfit[RawI+1]>=0){IsLost=0}
+        if(FileIData$TradeProfit[RawI]<=0 ){IsLost=IsLost+1}
+        if(FileIData$TradeProfit[RawI]>=0 ){IsLost=0}
+        FileIData$SequentialLost[RawI]=IsLost
+      }
+      
+      
+      
+      
+FileIData=FileIData[,c("TradeNumber", "CumProf","TradeProfit", "MoneyDD", "ClusterNum", "IsCluster", "SequentialLost")]
+    
+     #add calculate maximim drop in account equity starting at intial capital. Profile Account equity Capped at initial capital
+      FileIData$LargestConsLost=0
+      CumDD=0 #starting lost
+      CumProf=0 #starting lost..variable contanins the cummulative profit each time the profit become positive...to assome we always start after taking the worse case scenario
+
+      for (RawI in nrow(FileIData):1){ #it needs to start from the last raw raw (First  entry), which is the raw at the bottom in the list of entries.
+        
+        TradeIProfit=FileIData$TradeProfit[RawI]
+        DD=-FileIData$MoneyDD[RawI] #dd is given as positive, but need to be turned into a lost, so we make it negative
+        IsWinner=ifelse(TradeIProfit>=0, TRUE, FALSE)
+        
+        
+        if(IsWinner==FALSE) {
+          CumDD = CumDD+DD; 
+          CumProf=CumProf+TradeIProfit
+          FileIData$LargestConsLost[RawI]=CumDD
+
+        } 
+        
+        
+        if(IsWinner==TRUE)  {
+          FileIData$LargestConsLost[RawI]=CumDD+DD
+          if(FileIData$IsCluster[RawI]==TRUE){CumDD = CumDD+DD} else {CumDD = CumDD+TradeIProfit}
+          
+          CumProf=CumProf+TradeIProfit
+          if(length(FileIData$ClusterNum[RawI-1])==0){next}
+          if(CumProf>0){ if (FileIData$ClusterNum[RawI]!=FileIData$ClusterNum[RawI-1]){CumDD=0; CumProf=0}} ## reset only if the consequtntive trades are not part of a cluster
+         
+      }
+    
+    }  
+      
+      
+      
+      
+      
+      
+      ##max number of consecutive losing entries
+          nLossesClosing=max(FileIData$SequentialLost) # counts by method of closing all entries
+          nLossesMart=FileIData %>% count(ClusterNum, sort = TRUE)
+          nLossesMart=head(nLossesMart,1)$n
+          nLostEntries=max(nLossesClosing,nLossesMart) #max number of lossing entries in a raw
+ 
+      ##number of wining trades
+          nWinTrades=sum(FileIData$TradeProfit >=0)
+      
+      ##Calcualte MAximum Cummulative D
+      MaxDDMoney=min(FileIData$LargestConsLost)
+
+
+      MaxDD=data.frame(MaxDDMoney, nLostEntries)
+      
+      MaxDDs=data.frame(gsub(".csv","", FileI),Profit,Days=Days,MaxDD,nEntries=nEntries, nWinTrades=nWinTrades)
+      
+      colnames(MaxDDs)=c("ID", "Profit","nDays", "MaxDDMoney",  "nLostEntries", "nEntries", "nWinTrades")
+      
+      Summary=rbind(Summary,MaxDDs)
+      colnames(Summary)=c("ID", "Profit","nDays","MaxDDMoney",  "nLostEntries",  "nEntries", "nWinTrades")
+    }
+    
+   
+
+##add percent DD
+    Summary$PercDD=round(Summary$MaxDDMoney/StartingBalance*100,1)
+   
+
+#############################################################################
+#############--------summary results of all pairs-----------#################
+#############################################################################
+   
+
+    SummaryResults=data.frame()
+    SummaryFiles=ListEntries[grep("Optimora_", x = ListEntries$FileName),]$FileName
+    
+    IsOptiMora=ifelse(length(SummaryFiles)==0,FALSE,TRUE) #collect data differently if usuing old otpimizer
+    if (IsOptiMora==FALSE){SummaryFiles=ListEntries[grep(paste(Pairs,collapse="|"), x = ListEntries$FileName),]$FileName}
+    
+    
+    for (SummaryFileI in SummaryFiles){
+
+      SummaryFileIData=read.csv(paste0(Path,SummaryFileI)) #,sep=";"
+      
+      #if files has less than five row it means it dod not load correcly due to the use of semicolon instead of  a comma
+      if(ncol(SummaryFileIData)< 5){
+      SummaryFileIData=read.csv(paste0(Path,SummaryFileI),sep=";") 
+      }
+      
+      #remove unnecesary columns if sumamry file is from old optimizer
+      if(IsOptiMora==FALSE){
+          PairName=substring(SummaryFileI,1,6) 
+          #get first column of parameters of bot
+          FirtCol=grep("X__Name.for.robot",colnames(SummaryFileIData))
+          SummaryFileIData[2:(FirtCol-1)]=NULL #do not delete the first columns whithc is the name of the list of entrie
+
+          #there is a variant among coputers, in which the comment field appears last, in others appears earlier.
+          LastColName=colnames(SummaryFileIData)[ncol(SummaryFileIData)]
+          if(LastColName=="comment"){SummaryFileIData[ncol(SummaryFileIData)]=NULL} 
+          SummaryFileIData$Ticker=PairName
+      }
+      
+      #get defaults parameters (keep record for later use)
+      Ncols=ncol(SummaryFileIData)
+        DefaultPars=SummaryFileIData[1,c(1,1:(Ncols-2))] #last two columns are not parameters for the bot
+        DefaultPars=t(DefaultPars) #tranvert to better display in rows...
+        DefaultPars=cbind(rownames(DefaultPars),DefaultPars)
+        colnames(DefaultPars)=c("Parameter", "Value")
+        DefaultPars=as.data.frame(DefaultPars)
+        rownames(DefaultPars)<-NULL
+        DefaultPars=DefaultPars[-(1:2),] #delete the ID raws
+        
+      #get the two parameters optmized
+        
+        OptiPars=SummaryFileIData[-1, ] #delete the first raw, which contains the dafault parameters. 
+        OptiPars[OptiPars == ''] <- NA
+        OptiPars[OptiPars == ' '] <- NA
+        OptiPars=OptiPars[ , colSums(is.na(OptiPars)) == 0]
+      
+        SummaryResults=rbind(SummaryResults,OptiPars)
+    }
+    
+    XName=colnames(SummaryResults)[2]
+    YName=colnames(SummaryResults)[3]
+    if(IsOptiMora==FALSE){colnames(SummaryResults)=c("ID", "X", "Y",  "Pair")} else {colnames(SummaryResults)=c("ID", "X", "Y",  "Profit", "Pair"); SummaryResults$Profit=NULL } #profit is taken from the list of entries, instead
+    SummaryResults=data.frame(lapply(SummaryResults, function(x) {gsub("run\\", "", x, fixed=TRUE)})) 
+    SummaryResults=data.frame(lapply(SummaryResults, function(x) {gsub(".csv", "", x)})) 
+   
+
+
+    
+    
+    #allresults of profit and DD
+    FullResults=merge(Summary,SummaryResults, by="ID")
+    
+    #Replace time frames for minutes to allow sorting in plot
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("1 minute", "1", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("3 minutes", "3", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("5 minutes", "5", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("15 minutes", "15", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("30 minutes", "30", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("45 minutes", "45", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("1 hour", "60", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("2 hours", "120", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("3 hours", "180", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("4 hours", "240", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("1 day", "1440", x)})) #remove minutes..to allow later the sorting
+      FullResults <- data.frame(lapply(FullResults, function(x) {gsub("1 week", "10080", x)})) #remove minutes..to allow later the sorting
+       
+
+    #Convert columsn to numeric...the ones that can
+      numeric_cols <- data.frame(sapply(FullResults, Hmisc::all.is.numeric))#convert columns to numeric...find out if column can be converted to numeric
+      colnames(numeric_cols)="IsNUmeric"
+      numeric_cols$Var=rownames(numeric_cols)
+      numeric_cols=numeric_cols %>% filter(IsNUmeric==TRUE) #select all  varibales that can be conterd
+      NumericColumns=numeric_cols$Var #list of convertable variables
+    
+    FullResults[, NumericColumns] <- lapply(NumericColumns, function(x) as.numeric(FullResults[[x]])) #converts them to numeric
+    FullResults$MaxDDMoney=-1*(FullResults$MaxDDMoney)
+
+    FullResults$DDAccount=FullResults$MaxDDMoney/StartingBalance*100 # DD as percent of initical equity
+    FullResults$DD3Perc= (DesireMaxDD/FullResults$DDAccount)*100 #Percent of account to enter..standarized to have % drowdown of all account euitey 
+    FullResults$MoneyEntryAdjusted= (FullResults$DD3Perc/100)*StartingBalance #Percent of account to enter..standarized to have % drowdown of all account euitey 
+    FullResults$ProfitAt3Perc=FullResults$Profit*(FullResults$DD3Perc /100) #profit shall we enter with enough money to cause a %DD
+    FullResults$ProfitStan3PercDay=FullResults$ProfitAt3Perc/FullResults$nDays
+    FullResults$PercentDaysActive=FullResults$nEntries/FullResults$nDays
+    
+    FullResults$FailByAmount=ifelse(FullResults$MoneyEntryAdjusted<=MinMoneyEntry,"Yes","No")
+    FullResults$FailByTimeActive=ifelse(FullResults$PercentDaysActive<=MinActive,"Yes","No")
+    
+    FullResults$MeetTarget=ifelse(FullResults$ProfitStan3PercDay >=GainAtTarget,"Yes","No")
+    
+    LimVals=range(FullResults$ProfitStan3PercDay) #used for colorscale in plot of all pairs
+    LimVals=max(abs(LimVals))
+    #Calculate account summary
+    Filtered= FullResults %>% mutate(ProfitStan3PercDay=ifelse(FailByAmount=="Yes"  | FailByTimeActive=="Yes", 0, ProfitStan3PercDay)) #set profit to zero for pairs that do not meet criteria
+    
+
+    #count number of pairs that reach 1% profit per day target
+      MeetTarget=Filtered
+      
+      MeetTarget=MeetTarget %>% mutate(MeetProf = ifelse(ProfitStan3PercDay >=GainAtTarget,1,0)) %>% group_by(X,Y) %>% summarise(nOnTarget = sum(MeetProf))
+
+      MeetTarget=data.frame(as.data.table(MeetTarget))
+      MeetTarget$X=factor(MeetTarget$X)
+      MeetTarget$Y=factor(MeetTarget$Y)
+    
+       MeetTargetPlot= ggplot(MeetTarget, aes(X,Y, fill= nOnTarget )) + 
+        geom_tile(stat="identity") + 
+        labs(x=XName, y=YName)+
+        theme_bw()+
+        coord_cartesian(expand = FALSE)+
+        scale_fill_gradient(low =  "white", high = "blue", name="", limits = c(0, 10))+
+        #scale_fill_fermenter(palette = "Blues",direction=1, name="")+
+        theme(panel.grid=element_blank(),panel.border = element_rect(color = "black"))
+
+        MeetTargetPlot=ggplotly(MeetTargetPlot)
+    
+    
+
+    #summary results of complete account (entering in all pairs) with the results of each pair
+    Passing <-  Filtered %>% group_by(X,Y)%>% summarize(AccProf = sum(ProfitStan3PercDay))
+    colnames(Passing)=c("X","Y", "ProfitStan3PercDay")
+    All=Passing$ProfitStan3PercDay
+    
+    Passing =data.frame(as.data.table(Passing ))
+      #find most profitable parameters
+          Best=Passing[which.max(Passing$ProfitStan3PercDay), ] # most profitable parameters
+          BestX=Best$X
+          BestY=Best$Y
+      #Results of best parameter...to be used in robot
+          BestPar=FullResults[FullResults[,"X"]==BestX & FullResults[,"Y"]==BestY,]
+          BestPar <- BestPar[order(BestPar$ProfitStan3PercDay , decreasing =TRUE), ]
+    
+
+    
+    #Plot for summary of account
+    Passing $X=factor(Passing $X)
+    Passing $Y=factor(Passing $Y)
+    Limit=max(abs(max(Passing$ProfitStan3PercDay, na.rm=TRUE)), abs (min(Passing$ProfitStan3PercDay, na.rm=TRUE)))
+    #Doplot
+     Raster= ggplot(Passing, aes(X,Y, fill= ProfitStan3PercDay )) + 
+          geom_tile(stat="identity") + 
+          labs(x=XName, y=YName)+
+          theme_bw()+
+          coord_cartesian(expand = FALSE)+
+          scale_fill_gradient2(low = "red", mid = "white", high = "blue", midpoint = 0,  name="", limits = c(-Limit, Limit))+
+          #scale_fill_fermenter(palette = "Blues",direction=1, name="")+
+          theme(panel.grid=element_blank(),panel.border = element_rect(color = "black"))
+  
+      Raster=ggplotly(Raster)
+   
+   
+    
+    
+#Plot capped profits at target profit PLOT capping standarized profit to tartget of 1%...this is to avoid the effect of pairs that make too much, biasing summary results
+    CappedPair=data.frame(as.data.table(Filtered))
+    CappedPair$PCapped=ifelse(CappedPair$ProfitStan3PercDay >=GainAtTarget,GainAtTarget,CappedPair$ProfitStan3PercDay)
+    CappedPair=CappedPair %>%  group_by(X,Y) %>% summarise(Balance = sum(PCapped))   
+  
+    All=data.frame(RawPassProfit=All, CappedProfit=CappedPair$Balance)
+      CappedPair$X=factor(CappedPair$X)
+      CappedPair$Y=factor(CappedPair$Y)
+      LimitCap=max(abs(max(CappedPair$Balance, na.rm=TRUE)), abs (min(CappedPair$Balance, na.rm=TRUE)))
+      CappedPairPlot= ggplot(CappedPair, aes(X,Y, fill= Balance )) + 
+            geom_tile(stat="identity") + 
+            labs(x=XName, y=YName)+
+            theme_bw()+
+            coord_cartesian(expand = FALSE)+
+            scale_fill_gradient2(low = "red", mid = "white", high = "blue", midpoint = 0,  name="", limits = c(-LimitCap, LimitCap))+
+            #scale_fill_fermenter(palette = "Blues",direction=1, name="")+
+            theme(panel.grid=element_blank(),panel.border = element_rect(color = "black"))
+
+    CappedPairPlot=ggplotly(CappedPairPlot)
+    
+    
+    
+   #BarPlo
+   BestPar$ID=NULL
+  BarPlot= ggplot(BestPar, aes(x=reorder(Pair, -ProfitStan3PercDay)    , y=ProfitStan3PercDay ,fill=ProfitStan3PercDay )) + 
+    labs(title="",x="", y="Profit per day standarized to a desired dropdown")+
+    geom_bar(stat="identity", width=0.5)+
+    scale_fill_gradient2(low = "red", mid = "lightgrey", high = "blue", name="", limits = c(-Limit, Limit))+
+    theme_bw()
+  
+ BarPlot=BarPlot + theme(axis.text.x=element_text(color = "black",  angle=90))
+ BarPlot=BarPlot  + geom_hline(yintercept=GainAtTarget, linetype="dashed", color = "red",size=0.5)
+
+  BarPlot=ggplotly(BarPlot,tooltip="y")
+  
+
+
+   #Save profits of best parameters
+  FileName=paste0(NameOptimization,".csv")
+  write.csv(All,FileName)
+    
+```
+
+
+$$\\[.0005in]$$
+**PARAMETERS OPTIMIZED** <br />
+``r  XName ``  and ``r  YName ``<br /><br />
+
+**BEST PARAMETERS** <br />
+``r  XName `` = ``r  BestX `` <br />
+``r  YName `` = ``r  BestY `` <br />
+Profit account=  ``r  round(sum(BestPar$ProfitStan3PercDay ),0) `` (per day adjusted to desire% DD ) <br />
+Activity = ``r  round(sum(BestPar$nEntries )/max(BestPar$nDays ),2) `` (Cumulative number of entries in all pairs per week)<br />
+Desire DD = ``r DesireMaxDD``
+
+$$\\[.0005in]$$
+<center>
+<span style="color: red;">**Profit per day standardized to the desire percent dropdown**</span><br />
+Exclude pairs that when standardized to DD enter with less than $1,000 and pairs that fail to enter once a week
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+Raster
+```
+
+
+<br /><br />
+
+<span style="color: red;">**Capping pairs profit per day standardized to a desire percent dropdown**</span><br />
+The figure below is like the one above but capping the profits of all pairs to a traget of 1%, this avoids biasing the summary results of an account when only a handful of pairs yield very large profits. This figure basically trying to provide a sense of the extent to which the strategy is profitable across pairs.
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+CappedPairPlot
+```
+
+
+<br /><br />
+
+Comparison to prior optimizations of this robot. Double click on the plot to deselect all columns.
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+FilePath=dirname(rstudioapi::getSourceEditorContext()$path)
+FilesPriorBot=  data.frame(FileName=list.files(paste0(FilePath,"/")))
+FilesPriorBot=data.frame(FileName=FilesPriorBot[grep(RobotName, x = FilesPriorBot$FileName),])
+FilesPriorBot=data.frame(FileName=FilesPriorBot[grep("csv", x = FilesPriorBot$FileName),])
+FilesPriorBot=data.frame(FileName=FilesPriorBot[grep("BestPerpair", x = FilesPriorBot$FileName, invert=TRUE),])$FileName
+
+Optimizations=data.frame()
+for (FileIinBot in FilesPriorBot){
+  OptimizationName=gsub(".csv","",FileIinBot)
+  ResultOptimizationI= read.csv(paste0(FilePath,"/",FileIinBot)) 
+  ResultOptimizationI$Name=OptimizationName
+  Optimizations=rbind(Optimizations,ResultOptimizationI)
+}
+
+#remove optimizations with zeros
+Optimizations=Optimizations %>% filter(CappedProfit>0)
+
+Optimizations=Optimizations[order(Optimizations$CappedProfit, decreasing = TRUE), ] 
+Optimizations$X=1:nrow(Optimizations)
+Labels=Optimizations$Name
+
+
+#do bar plot
+OptiComparison=ggplot(Optimizations, aes(X, CappedProfit)) +
+    labs(title="",x="Rank", y="Capped Profit")+
+   theme_bw()+
+    geom_col(mapping = aes(fill = Name),  position = position_dodge()) +
+  #  scale_fill_manual("legend", values = color)
+#    scale_alpha_manual(values = c(1))+
+    theme(legend.title = element_blank())
+
+    OptiComparison=ggplotly(OptiComparison,tooltip="Name")
+  
+OptiComparison
+
+
+
+```
+
+<br /><br />
+
+
+Number of pairs that meet 1% profit target
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+MeetTargetPlot
+```
+
+<br /><br />
+Results for ``r  XName `` = ``r  BestX ``  and ``r  YName `` = ``r  BestY ``<br /><br />
+
+
+
+
+
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+BarPlot
+```
+</center>
+
+
+<details>
+  <summary>Best parameters</summary>
+```{r, echo=FALSE, eval=TRUE}
+
+knitr::kable(BestPar)
+```
+</details> 
+
+
+
+<center>
+
+**Results by pair**
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+library(RColorBrewer)  #Also offer more options
+
+FullResults$X=factor(FullResults$X)
+FullResults$Y=factor(FullResults$Y)
+      
+Blues=colorRampPalette(brewer.pal(9,"GnBu"))
+Reds=colorRampPalette(brewer.pal(9,"OrRd"))
+
+   Pairs= ggplot(FullResults, aes(X,Y, fill= ProfitStan3PercDay )) + 
+        geom_tile(stat="identity")+
+        labs(x=XName, y=YName)+
+        theme_bw()+
+        coord_cartesian(expand = FALSE)+
+        scale_fill_gradientn( colors=c( rev(Reds(9)), "white", (Blues(9)) ), limits = c(-LimVals, LimVals),  name="")+
+        facet_wrap(~ Pair)+
+        theme(axis.text = element_text( size = 5),panel.spacing.x=unit(0.5, "lines") , panel.spacing.y=unit(1,"lines"))
+
+Pairs=ggplotly(Pairs) 
+
+#Pairs=Pairs%>% layout(margin = list( l = 1, b=1))
+
+#Results capped
+Pairs
+
+```
+
+
+$$\\[.005in]$$
+</center>
+
+
+
+
+<center>
+
+**Results by pair capped to desired 1% profit** </br>
+This is the same as above, but caps pairs to max desire profit to avoid visual bias by pairs with very lage profits
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+
+PairCapped= FullResults %>% mutate(ProfitStan3PercDay  = ifelse(ProfitStan3PercDay  >=GainAtTarget,GainAtTarget,ProfitStan3PercDay )) #set profit to zero for pairs that do not meet criteria
+   PairCappedPlot= ggplot(PairCapped, aes(X,Y, fill= ProfitStan3PercDay )) + 
+        geom_tile(stat="identity")+
+        facet_wrap(~ Pair)+
+        labs(x=XName, y=YName)+
+        theme_bw()+
+        coord_cartesian(expand = FALSE)+
+        scale_fill_gradientn( colors=c( rev(Reds(9)), "white", (Blues(9)) ), limits = c(-GainAtTarget, GainAtTarget),  name="")+
+
+        theme(axis.text = element_text( size = 5),panel.spacing.x=unit(0.1, "lines") ,panel.spacing.y=unit(1,"lines"))
+
+PairCappedPlot=ggplotly(PairCappedPlot) 
+
+#Pairs=Pairs%>% layout(margin = list( l = 1, b=1))
+
+#Results capped
+PairCappedPlot
+
+```
+
+
+$$\\[.005in]$$
+</center>
+
+
+
+    
+    
+
+
+<center>
+
+**Results within desire DD, top 5 with most winning trades, and ranked by Profit per day at desire DD** </br>
+One is in the search of a unique combination of parameters that can be used across forex pairs; the reality is, however, that they represent countries with vast differences in economic power, which can cause specific patterns within certain pairs, thus, in most likelihoods parameters are specific to each forex pair. Here I show the best results for each pair.
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
+
+#select desire combinations only
+BestPerPair=FullResults %>% filter(PercDD>=-DesireMaxDD)
+BestPerPair=BestPerPair %>% group_by(Pair) %>% slice_max(order_by = nWinTrades, n = 5)
+BestPerPair$YName=YName
+BestPerPair$XName=XName
+  NameX=paste0(NameOptimization,"_BestPerpair.csv")
+  write.csv(BestPerPair,NameX)
+  
+
+PastBestPerPairFile=  data.frame(FileName=list.files(paste0(FilePath,"/")))
+PastBestPerPairFile=data.frame(FileName=PastBestPerPairFile[grep(RobotName, x = PastBestPerPairFile$FileName),])
+PastBestPerPairFile=data.frame(FileName=PastBestPerPairFile[grep("csv", x = PastBestPerPairFile$FileName),])
+PastBestPerPairFile=data.frame(FileName=PastBestPerPairFile[grep("BestPerpair", x = PastBestPerPairFile$FileName),])$FileName
+
+PairsBests=data.frame()
+for (FileIinBot in PastBestPerPairFile){
+  OptimizationName=gsub("_BestPerpair.csv","",FileIinBot)
+  ResultOptimizationI= read.csv(paste0(FilePath,"/",FileIinBot)) 
+  ResultOptimizationI$Name=OptimizationName
+  PairsBests=rbind(PairsBests,ResultOptimizationI)
+}
+
+#cap extreme values to maxmium  desire profit
+Cap=StartingBalance*(MaxDesDayProf/100)
+ 
+PairsBests$PCapped=ifelse(PairsBests$ProfitStan3PercDay >=Cap,Cap,PairsBests$ProfitStan3PercDay)
+PairsBests=PairsBests[with(PairsBests, order(Pair, -PCapped)),]
+
+PairsBests=PairsBests %>% group_by(Pair) %>% mutate(Xaxis = 1:n())
+
+PairsBests=data.frame(PairsBests)
+
+ToolTip=paste(PairsBests$Name,
+              '<br>',PairsBests$YName, ": ", PairsBests$Y,
+              '<br>',PairsBests$XName, ": ", PairsBests$X)
+
+
+
+#do bar plot
+OptiComparison=ggplot(PairsBests, aes(Xaxis, PCapped, text = ToolTip)) +
+    labs(title="",x="", y="Capped Profit")+
+   theme_bw()+
+          facet_wrap(~ Pair)+
+    geom_col(mapping = aes(fill = Name),  position = position_dodge()) +
+
+    theme(legend.title = element_blank(), axis.text.x=element_blank())
+
+    OptiComparison=ggplotly(OptiComparison,tooltip="ToolTip")
+  
+OptiComparison
+
+
+```
+
+
+$$\\[.005in]$$
+</center>
+
+    
+    
+    
+    
+    
+    
+    
+    
+<details>
+  <summary>Default parameters</summary>
+```{r, echo=FALSE, eval=TRUE}
+knitr::kable(DefaultPars)
+```
+</details> 

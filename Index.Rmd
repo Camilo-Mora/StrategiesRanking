@@ -1,0 +1,62 @@
+---
+title: "Rankings"
+output:  html_document
+---
+
+Ranking of optimization strategies.
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+library(plotly)
+library(ggplot2)
+library(randomcoloR)
+
+# download a .zip file of the repository
+download.file(url = "https://github.com/Camilo-Mora/RankingStrategies/archive/refs/heads/main.zip"           , destfile = "meetingsR-master.zip")
+
+# unzip the .zip file
+unzip(zipfile = "meetingsR-master.zip")
+
+#select sumamry files...they have robot and .csv in their names
+Files=list.files(paste0(getwd(),"/RankingStrategies-main"))
+
+Files=grep("Robot_",Files,value =TRUE)
+Files=grep(".csv",Files,value =TRUE)
+nFiles=length(Files)
+Colors <- distinctColorPalette(nFiles) #colors for each distinctive file
+
+SummaryResults=data.frame()
+for (FileIn in 1:nFiles){
+FileI=Files[FileIn]
+
+PathFileI=paste0("https://raw.githubusercontent.com/Camilo-Mora/RankingStrategies/main/", FileI)
+GDPData=read.csv(PathFileI ,row.names = NULL)
+GDPData$X=NULL
+GDPData$RobotConf=gsub(".csv","", FileI)
+GDPData$RobotConf=gsub("Robot_","", GDPData$RobotConf)
+GDPData$Color=Colors[FileIn]
+SummaryResults=rbind(SummaryResults,GDPData)
+}
+
+
+
+SummaryResults=SummaryResults[order(SummaryResults$x, decreasing = TRUE), ]
+
+SummaryResults$Rank=1:nrow(SummaryResults)
+colnames(SummaryResults)=c("Profit", "RobotConf", "Color", "Rank")
+
+BarColors=SummaryResults$Color
+SummaryResults$Color=NULL
+SummaryResults$Rank=factor(SummaryResults$Rank)
+SummaryResults$Profit=round(SummaryResults$Profit,0)
+#do plot
+Ranking=ggplot(data=SummaryResults, aes(x=Rank, y=Profit,group=RobotConf)) +
+        geom_bar(stat="identity", fill= BarColors)+
+        theme_bw()+
+        coord_cartesian(expand = FALSE)+
+        labs(x="Ranking", y="Profit standarized to 3%dd per day")
+
+ggplotly(Ranking) %>% layout( barmode = 'group')
+```
+
+
+
