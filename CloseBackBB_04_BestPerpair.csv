@@ -1,0 +1,2 @@
+"","ID","Profit","nDays","MaxDDMoney","nLostEntries","nEntries","nWinTrades","PercDD","X","Y","Pair","DDAccount","DD3Perc","MoneyEntryAdjusted","ProfitAt3Perc","ProfitStan3PercDay","PercentDaysActive","FailByAmount","FailByTimeActive","MeetTarget","YName","XName"
+"1","A00150",17502.31,355.01,2514.29,2,188,157,-8.4,"75","3","GBPUSD",8.38096666666667,119.317978435264,35795.3935305792,20883.4024714731,58.8248287977045,0.529562547533872,"No","No","Yes","BB.Number.of.SDs.to.Enter","BB.Length.Bollinger.bands.to.Enter"
