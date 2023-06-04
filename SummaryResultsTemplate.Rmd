@@ -1,6 +1,6 @@
 
 ---
-title: "RobotName: CloseBackBB"
+title: "RobotName: CloseBackPPO"
 output: html_document
 ---
 
@@ -12,8 +12,8 @@ Version: 91.1
 
 ##########################################################################################
 #THIS IS THE ONLY THING TO CHANGE
-RobotName="CloseBackBB" # TTTLoadedV1" #ScalperV3 LoadedV1  TTTLoadedV1 Karol Killerzones   BlaiKelt
-OptimizationNum= "10"
+RobotName="CloseBackPPO" # TTTLoadedV1" #ScalperV3 LoadedV1  TTTLoadedV1 Karol Killerzones   BlaiKelt
+OptimizationNum= "01"
 
 
 NameOptimization=paste0(RobotName, "_", OptimizationNum)
@@ -34,7 +34,7 @@ library(ggpubr)
 Pairs=c("AUDUSD", "EURGBP", "EURJPY", "EURUSD", "GBPJPY", "GBPUSD", "NZDUSD", "USDCAD", "USDCHF",  "USDJPY", "XAUUSD")
 StartingBalance=30000  #amount of initial capital
 MinMoneyEntry=1000     #Minimum amount of moey allowed to enter..$1,000 is the least we can invest
-MinActive=0.2          #number of entries per day set to 0.2..meaning it will be active atleast 20% of a year...or it will enter at least once a week
+
 GainAtTarget=30        #amount of money at 1% profit per day.. 1% of $30,000
 DesireMaxDD=10          # Maximum prcent DD allowed to select parameters
 MaxDesDayProf=1         #percentdesired dayliy profit
@@ -305,14 +305,11 @@ FileIData=FileIData[,c("TradeNumber", "CumProf","TradeProfit", "MoneyDD", "Clust
     FullResults$PercentDaysActive=FullResults$nEntries/FullResults$nDays
     
     FullResults$FailByAmount=ifelse(FullResults$MoneyEntryAdjusted<=MinMoneyEntry,"Yes","No")
-    FullResults$FailByTimeActive=ifelse(FullResults$PercentDaysActive<=MinActive,"Yes","No")
-    
-    FullResults$MeetTarget=ifelse(FullResults$ProfitStan3PercDay >=GainAtTarget,"Yes","No")
-    
+
     LimVals=range(FullResults$ProfitStan3PercDay) #used for colorscale in plot of all pairs
     LimVals=max(abs(LimVals))
     #Calculate account summary
-    Filtered= FullResults %>% mutate(ProfitStan3PercDay=ifelse(FailByAmount=="Yes"  | FailByTimeActive=="Yes", 0, ProfitStan3PercDay)) #set profit to zero for pairs that do not meet criteria
+    Filtered= FullResults %>% mutate(ProfitStan3PercDay=ifelse(FailByAmount=="Yes"  , 0, ProfitStan3PercDay)) #set profit to zero for pairs that do not meet criteria
     
 
     #count number of pairs that reach 1% profit per day target
@@ -606,7 +603,7 @@ One is in the search of a unique combination of parameters that can be used acro
 ```{r, echo=FALSE, message=FALSE,warning=FALSE, fig.align = 'center'}
 
 #select desire combinations only
-BestPerPair=FullResults %>% filter(PercDD>=-DesireMaxDD)
+BestPerPair=FullResults %>% filter(MoneyEntryAdjusted >=MinMoneyEntry)
 BestPerPair=BestPerPair %>% group_by(Pair) %>% slice_max(order_by = nWinTrades, n = 5)
 BestPerPair$YName=YName
 BestPerPair$XName=XName
