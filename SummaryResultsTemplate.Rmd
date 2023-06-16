@@ -12,8 +12,8 @@ Version: 91.1
 
 ##########################################################################################
 #THIS IS THE ONLY THING TO CHANGE
-RobotName="CloseBackPPO" # TTTLoadedV1" #ScalperV3 LoadedV1  TTTLoadedV1 Karol Killerzones   BlaiKelt
-OptimizationNum= "21"
+RobotName="CloseBackPPO_BLAI" # TTTLoadedV1" #ScalperV3 LoadedV1  TTTLoadedV1 Karol Killerzones   BlaiKelt
+OptimizationNum= "10"
 
 
 NameOptimization=paste0(RobotName, "_", OptimizationNum)
